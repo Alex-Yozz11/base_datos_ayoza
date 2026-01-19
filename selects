@@ -1,0 +1,96 @@
+--1) Top 5 clientes por gasto total (solo facturas pagadas y activas)
+--Enunciado:
+--La concesionaria quiere reconocer a los 5 clientes que más han gastado. Calcula el total gastado por cliente (facturas con estado = 'PAGADA' y activo = TRUE) y muestra nombre completo, email y total gastado, ordenado de mayor a menor. Usa un CTE.
+
+WITH gasto_cliente AS (
+  SELECT 
+    c.id_cliente,
+    c.nombre || ' ' || c.apellido AS nombre_completo,
+    c.email,
+    SUM(f.total) AS total_gastado
+  FROM ayoza.Cliente c
+  JOIN ayoza.Factura f ON f.id_cliente = c.id_cliente
+  WHERE f.estado = 'PAGADA' AND f.activo = TRUE
+  GROUP BY c.id_cliente, c.nombre, c.apellido, c.email
+)
+SELECT nombre_completo, email, total_gastado
+FROM gasto_cliente
+ORDER BY total_gastado DESC
+LIMIT 5;
+
+--2) Vehículos más vendidos: cantidad y monto + ranking con ventana
+--Enunciado:
+--Gerencia quiere conocer los vehículos más vendidos por cantidad y por monto. Para cada vehículo, calcula cantidad total vendida y el monto total (sumando subtotal_linea) considerando facturas pagadas y activas. Agrega ranking por cantidad y por monto con funciones de ventana.
+
+SELECT 
+  v.marca,
+  v.modelo,
+  SUM(df.cantidad) AS cantidad_total,
+  SUM(df.subtotal_linea) AS monto_total,
+  RANK() OVER (ORDER BY SUM(df.cantidad) DESC) AS rank_cantidad,
+  RANK() OVER (ORDER BY SUM(df.subtotal_linea) DESC) AS rank_monto
+FROM ayoza.Detalle_Factura df
+JOIN ayoza.Factura f ON f.id_factura = df.id_factura
+JOIN ayoza.Vehiculo v ON v.id_vehiculo = df.id_vehiculo
+WHERE f.estado = 'PAGADA' AND f.activo = TRUE
+GROUP BY v.marca, v.modelo
+ORDER BY cantidad_total DESC;
+
+--3) Productividad por vendedor: número de ventas, total y ticket promedio
+--Enunciado:
+--La empresa desea evaluar la productividad comercial. Para cada vendedor, muestra: número de facturas pagadas, total vendido y ticket promedio (total / número de facturas), considerando solo facturas estado = 'PAGADA' y activo = TRUE. Ordena por total vendido de mayor a menor.
+
+SELECT 
+  v.id_vendedor,
+  v.nombre,
+  COUNT(f.id_factura) AS numero_ventas,
+  SUM(f.total) AS total_vendido,
+  ROUND(SUM(f.total)::numeric / COUNT(f.id_factura), 2) AS ticket_promedio
+FROM ayoza.Vendedor v
+JOIN ayoza.Factura f ON f.id_vendedor = v.id_vendedor
+WHERE f.estado = 'PAGADA' AND f.activo = TRUE
+GROUP BY v.id_vendedor, v.nombre
+ORDER BY total_vendido DESC;
+
+
+--4) Ingresos por tipo de vehículo y participación (%)
+--Enunciado:
+--Dirección quiere saber qué tipos de vehículo aportan más a los ingresos. Calcula el ingreso total por tipo de vehículo (sumando subtotal_linea del detalle) y la participación porcentual sobre el total, considerando facturas pagadas y registros activos.
+
+WITH ingresos AS (
+  SELECT 
+    tv.nombre AS tipo_vehiculo,
+    SUM(df.subtotal_linea) AS ingreso_total
+  FROM ayoza.Detalle_Factura df
+  JOIN ayoza.Factura f ON f.id_factura = df.id_factura
+  JOIN ayoza.Vehiculo v ON v.id_vehiculo = df.id_vehiculo
+  JOIN ayoza.Tipo_Vehiculo tv ON tv.id_tipo_vehiculo = v.id_tipo_vehiculo
+  WHERE f.estado = 'PAGADA' AND f.activo = TRUE
+  GROUP BY tv.nombre
+)
+SELECT 
+  tipo_vehiculo,
+  ingreso_total,
+  ROUND(ingreso_total * 100.0 / SUM(ingreso_total) OVER (), 2) AS participacion_porcentual
+FROM ingresos
+ORDER BY ingreso_total DESC;
+
+
+--5) Auditoría: facturas donde subtotal + impuesto ≠ total o subtotal ≠ suma del detalle
+--Enunciado:
+--Contabilidad quiere detectar inconsistencias: (a) facturas cuyo subtotal + impuesto no coincide con total, y (b) facturas donde la suma de Detalle_Factura.subtotal_linea no coincide con el subtotal de la factura. Lista el id_factura, montos y diferencias.
+
+-- (a) subtotal + impuesto ≠ total
+SELECT f.id_factura, f.subtotal, f.impuesto, f.total,
+       (f.subtotal + f.impuesto - f.total) AS diferencia
+FROM ayoza.Factura f
+WHERE (f.subtotal + f.impuesto) <> f.total;
+
+-- (b) subtotal ≠ suma del detalle
+SELECT f.id_factura, f.subtotal, f.impuesto, f.total,
+       (f.subtotal - SUM(df.subtotal_linea)) AS diferencia
+FROM ayoza.Factura f
+JOIN ayoza.Detalle_Factura df ON df.id_factura = f.id_factura
+GROUP BY f.id_factura, f.subtotal, f.impuesto, f.total
+HAVING SUM(df.subtotal_linea) <> f.subtotal;
+
